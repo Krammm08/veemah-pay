@@ -1,6 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
 
+const JAVA_BACKEND_URL = process.env.JAVA_BACKEND_URL || 'http://localhost:8080';
+
+function maskAccountName(raw: string) {
+  const cleaned = String(raw ?? '').trim().replace(/\s+/g, ' ');
+  if (!cleaned) return '';
+
+  const parts = cleaned.split(' ').filter(Boolean);
+  const first = parts[0] ?? '';
+  const last = parts.length > 1 ? parts[parts.length - 1] : '';
+
+  const firstInitial = first ? first[0] : '';
+  const firstStars = Math.max(0, first.length - (first ? 1 : 0));
+  const maskedFirst = firstInitial + (firstStars ? '*'.repeat(firstStars) : '');
+
+  if (!last) return maskedFirst;
+  const lastInitial = last ? last[0] : '';
+  return `${maskedFirst} ${lastInitial}.`;
+}
+
 async function getAdminWhereClause() {
   const colRes = await pool.query(
     `SELECT column_name FROM information_schema.columns WHERE table_name = 'accounts'`
@@ -46,6 +65,28 @@ export async function GET(_req: NextRequest, { params }: { params: { account_num
     );
     if (result.rowCount === 0) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     return NextResponse.json({ account: result.rows[0] });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message ?? 'Server error' }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest, { params }: { params: { account_number: string } }) {
+  const { account_number } = params;
+  const session = req.cookies.get('session')?.value;
+  if (!session) return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+  await req.json().catch(() => ({}));
+
+  try {
+    const upstream = await fetch(`${JAVA_BACKEND_URL}/api/accounts/${encodeURIComponent(account_number)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const data = await upstream.json().catch(() => null);
+    if (!upstream.ok) {
+      return NextResponse.json(data ?? { error: 'Upstream error' }, { status: upstream.status });
+    }
+    return NextResponse.json(data);
   } catch (err: any) {
     return NextResponse.json({ error: err.message ?? 'Server error' }, { status: 500 });
   }
@@ -132,27 +173,16 @@ export async function PATCH(req: NextRequest, { params }: { params: { account_nu
   }
 
   try {
-    const current = await pool.query('SELECT status, balance::float AS balance FROM accounts WHERE account_number = $1', [account_number]);
-    if (current.rowCount === 0) return NextResponse.json({ error: 'Account not found' }, { status: 404 });
-    const { status: currStatus, balance } = current.rows[0];
-    if (currStatus === 'Locked' || currStatus === 'Archived') return NextResponse.json({ error: 'Account unavailable' }, { status: 403 });
-
-    if (op === 'deposit') {
-      if (amount < 100) return NextResponse.json({ error: 'Deposit minimum is 100.' }, { status: 400 });
-      const res = await pool.query(
-        'UPDATE accounts SET balance = balance + $1 WHERE account_number = $2 RETURNING account_number, name, balance::float AS balance, status',
-        [amount, account_number]
-      );
-      return NextResponse.json({ account: res.rows[0] });
-    } else {
-      if (amount < 100) return NextResponse.json({ error: 'Withdrawal minimum is 100.' }, { status: 400 });
-      if (amount > balance) return NextResponse.json({ error: 'Insufficient funds.' }, { status: 400 });
-      const res = await pool.query(
-        'UPDATE accounts SET balance = balance - $1 WHERE account_number = $2 RETURNING account_number, name, balance::float AS balance, status',
-        [amount, account_number]
-      );
-      return NextResponse.json({ account: res.rows[0] });
+    const upstream = await fetch(`${JAVA_BACKEND_URL}/api/accounts/${encodeURIComponent(account_number)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op, amount }),
+    });
+    const data = await upstream.json().catch(() => null);
+    if (!upstream.ok) {
+      return NextResponse.json(data ?? { error: 'Upstream error' }, { status: upstream.status });
     }
+    return NextResponse.json({ account: data });
   } catch (err: any) {
     return NextResponse.json({ error: err.message ?? 'Server error' }, { status: 500 });
   }
