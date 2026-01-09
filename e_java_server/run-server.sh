@@ -1,11 +1,6 @@
+
 #!/bin/bash
 
-<<<<<<< HEAD
-# VeemahPay Transaction Server Build & Run Script
-echo "================================================"
-echo "VeemahPay Transaction Server"
-echo "================================================"
-=======
 function red() {
     echo -e "\e[31m$1\e[0m"
 }
@@ -22,45 +17,50 @@ function blue() {
     echo -e "\e[34m$1\e[0m"
 }
 
-# VeemahPay Transaction Server Build & Run Script
-red   "================================================"
-green "         VeemahPay Transaction Server"
-red   "================================================"
->>>>>>> a33913a (java-working)
+function white() {
+    echo -e "\e[37m$1\e[0m"
+}
+
+stop_all() {
+  red "Stopping servers..."
+  # Stop Java server
+  if [ -n "${JAVA_PID:-}" ] && kill -0 "$JAVA_PID" 2>/dev/null; then
+    red "Stopping Java server (PID: $JAVA_PID)..."
+    kill "$JAVA_PID" 2>/dev/null || true
+    sleep 1
+    if kill -0 "$JAVA_PID" 2>/dev/null; then
+      kill -9 "$JAVA_PID" 2>/dev/null || true
+    fi
+  fi
+
+  # Stop ngrok
+  if [ -n "${NGROK_PID:-}" ] && kill -0 "$NGROK_PID" 2>/dev/null; then
+    red "Stopping ngrok (PID: $NGROK_PID)..."
+    kill "$NGROK_PID" 2>/dev/null || true
+    sleep 1
+    if kill -0 "$NGROK_PID" 2>/dev/null; then
+      kill -9 "$NGROK_PID" 2>/dev/null || true
+    fi
+  fi
+
+  green "All processes stopped"
+}
+
+# VeemahPay Transaction Server Build & Run Script (GUI Mode Only)
+yellow "================================================"
+white  "         VeemahPay Transaction Server"
+yellow "================================================"
 
 # Set paths
 SERVER_DIR="/media/deadbush225/LocalDisk/System/Coding/For School/veemah-pay/e_java_server"
-POSTGRES_JAR_URL="https://jdbc.postgresql.org/download/postgresql-42.7.3.jar"
-POSTGRES_JAR="postgresql-42.7.3.jar"
+POSTGRES_JAR_URL="https://jdbc.postgresql.org/download/postgresql-42.7.4.jar"
+POSTGRES_JAR="postgresql-42.7.4.jar"
 
 cd "$SERVER_DIR"
 
 # Check if PostgreSQL driver exists
 if [ ! -f "$POSTGRES_JAR" ]; then
-<<<<<<< HEAD
-    echo "📥 Downloading PostgreSQL JDBC driver..."
-    wget -O "$POSTGRES_JAR" "$POSTGRES_JAR_URL"
-    if [ $? -eq 0 ]; then
-        echo "✓ PostgreSQL driver downloaded successfully"
-    else
-        echo "❌ Failed to download PostgreSQL driver"
-        echo "Please download manually from: $POSTGRES_JAR_URL"
-        exit 1
-    fi
-else
-    echo "✓ PostgreSQL driver found"
-fi
-
-# Compile Java files
-echo "🔨 Compiling Java server..."
-javac -cp ".:$POSTGRES_JAR" *.java
-
-if [ $? -eq 0 ]; then
-    echo "✓ Compilation successful"
-else
-    echo "❌ Compilation failed"
-=======
-    blue "Downloading PostgreSQL JDBC driver..."
+    yellow "Downloading PostgreSQL JDBC driver..."
     wget -O "$POSTGRES_JAR" "$POSTGRES_JAR_URL"
     if [ $? -eq 0 ]; then
         green "PostgreSQL driver downloaded successfully"
@@ -73,34 +73,46 @@ else
     green "PostgreSQL driver found"
 fi
 
-# Compile Java files
-blue "Compiling Java server..."
-javac -cp ".:$POSTGRES_JAR" *.java
+# Compile Java files (including modules)
+yellow "Compiling Java server with modular structure..."
+javac -cp ".:$POSTGRES_JAR" *.java modules/*/*.java
 
 if [ $? -eq 0 ]; then
-    green "Compilation successful"
+    green "Compilation successful\n"
 else
     red "Compilation failed"
->>>>>>> a33913a (java-working)
     exit 1
 fi
 
+# Start ngrok tunnel in the background
+green "Starting ngrok tunnel..."
+# Start ngrok in background (with checks & logging)
+NGROK_HOST="sasha-nonreliable-thunderingly.ngrok-free.dev"
+NGROK_PORT=8081
+NGROK_LOG="${SERVER_DIR}/ngrok.log"
+
+yellow "Starting ngrok tunnel to ${NGROK_HOST}:${NGROK_PORT}..."
+nohup ngrok http --domain="$NGROK_HOST" "$NGROK_PORT" >"$NGROK_LOG" 2>&1 &
+NGROK_PID=$!
+sleep 2
+if kill -0 "$NGROK_PID" 2>/dev/null; then
+  green "ngrok started (PID: $NGROK_PID). Logs: $NGROK_LOG"
+else
+  red "Failed to start ngrok. Check $NGROK_LOG"
+  NGROK_PID=""
+fi
+
+sleep 2  # Give ngrok time to start
+
 # Start server
-<<<<<<< HEAD
-echo "🚀 Starting VeemahPay Transaction Server..."
-=======
-echo "Starting VeemahPay Transaction Server..."
->>>>>>> a33913a (java-working)
-echo ""
-java -cp ".:$POSTGRES_JAR" Server
+green "Starting VeemahPay Transaction Server in GUI mode...\n"
+
+# Always start in GUI mode
+green "Starting server with graphical interface..."
+java -cp ".:$POSTGRES_JAR" ServerGUI
+
+# User pressed enter — stop both
+stop_all
 
 # Cleanup on exit
-<<<<<<< HEAD
-echo ""
-echo "🛑 Server stopped"
-=======
-red "Exiting..."
-echo ""
-red "Server stopped"
-
->>>>>>> a33913a (java-working)
+red "Exiting...\n"

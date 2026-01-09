@@ -749,9 +749,6 @@ export async function GET(req: NextRequest) {
     if (!source_account || (t === 'transfer' && !target_account)) {
       return NextResponse.json({ error: 'Missing account(s)' }, { status: 400 });
     }
-    if ((t === 'withdraw' || t === 'transfer') && !pin) {
-        return NextResponse.json({ error: 'PIN is required for this transaction.' }, { status: 400 });
-    }
 
     // Authorization: customers can only act on their own source account; admin can act on any.
     const isAdmin = await isAdminSession(session);
@@ -759,24 +756,35 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const upstream = await fetch(`${JAVA_BACKEND_URL}/api/transactions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: t,
-        source_account,
-        target_account,
-        amount: amt,
-        note,
-        pending,
-        pin,
-      }),
-    });
-    const data = await upstream.json().catch(() => null);
-    if (!upstream.ok) {
-      return NextResponse.json(data ?? { error: 'Transaction failed' }, { status: upstream.status });
+    if ((t === 'withdraw' || t === 'transfer') && !isAdmin && !pin) {
+        return NextResponse.json({ error: 'PIN is required for this transaction.' }, { status: 400 });
     }
-    return NextResponse.json(data ?? { ok: true });
+
+    try {
+      const upstream = await fetch(`${JAVA_BACKEND_URL}/api/transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: t,
+          source_account,
+          target_account,
+          amount: amt,
+          note,
+          pending,
+          pin,
+        }),
+      });
+      if (upstream.ok) {
+        const data = await upstream.json().catch(() => null);
+        return NextResponse.json(data ?? { ok: true });
+      }
+      console.warn(`[POST /api/transactions] Java server returned ${upstream.status}, falling back to local DB.`);
+    } catch (e) {
+      console.warn('[POST /api/transactions] Java server unreachable, falling back to local DB:', e);
+    }
+
+    client = await pool.connect();
+    await client.query('BEGIN');
 
     // 1. Acquire locks in deterministic order to prevent deadlocks and race conditions
     const accountsToLock = [source_account];
