@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { Header } from '@/components/nav/Header';
 import { SpendingGraph } from '@/components/dashboard/SpendingGraph';
 import { useLanguage } from '@/components/ui/LanguageProvider';
+import { useAuth } from '@/components/ui/AuthProvider';
 import { QRModal } from '@/components/ui/QRModal';
 import { MoneyDisplay, PositiveMoney } from '@/components/ui/MoneyDisplay';
 import { useToast } from "@/components/ui/Toast";
@@ -16,8 +17,9 @@ type Transaction = { id: number; type: string; status: string; amount: number; a
 export default function UserPage() {
   const router = useRouter();
   const { t } = useLanguage();
+  const { me: authMe, setMe: setAuthMe } = useAuth();
+  const me = authMe?.account ? (authMe.account as unknown as Account) : null;
   const toast = useToast();
-  const [me, setMe] = useState<Account | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [depAmount, setDepAmount] = useState("");
@@ -63,22 +65,24 @@ export default function UserPage() {
     };
   }, [t]);
 
-  const fetchMe = useCallback(async () => {
+  const fetchMe = useCallback(async (): Promise<Account | null> => {
     try {
       const res = await fetch("/api/me");
       const data: any = await readJson(res);
       if (!res.ok) {
         setError(data?.error || t('user.operation_failed'));
-        return;
+        return null;
       }
       if (data?.authenticated) {
-        if (!!data?.isAdmin) { router.replace("/admin"); return; }
-        setMe(data.account);
-        return;
+        if (!!data?.isAdmin) { router.replace("/admin"); return null; }
+        setAuthMe(data);
+        return data.account as Account;
       }
       router.replace("/login");
+      return null;
     } catch (e: any) {
       setError(e?.message || t('user.operation_failed'));
+      return null;
     }
   }, [router, t]);
 
@@ -98,11 +102,11 @@ export default function UserPage() {
   }, [t]);
 
   const refreshData = useCallback(async () => {
-    if (!me) return;
     setRefreshing(true);
     try {
-      await fetchMe();
-      await fetchTransactions(me.account_number);
+      const updated = await fetchMe();
+      const acc = updated?.account_number ?? me?.account_number;
+      if (acc) await fetchTransactions(acc);
     } catch (e: any) {
       setError(e?.message || t('user.operation_failed'));
     } finally {
@@ -199,6 +203,13 @@ export default function UserPage() {
         const result = await createTransaction(transactionData);
         if (result.success) {
           opOk = true;
+          // If Java server returned updated balances, reflect them immediately
+          try {
+            const tx: any = result.transaction;
+            if (tx && typeof tx.source_balance_after !== 'undefined') {
+              setAuthMe((prev) => prev && prev.account ? { ...prev, account: { ...prev.account, balance: Number(tx.source_balance_after) } } : prev);
+            }
+          } catch {}
         } else {
           throw new Error(result.message || 'Transaction failed');
         }
@@ -271,6 +282,12 @@ export default function UserPage() {
         const result = await createTransaction(transactionData);
         if (result.success) {
           opOk = true;
+          try {
+            const tx: any = result.transaction;
+            if (tx && typeof tx.source_balance_after !== 'undefined') {
+              setAuthMe((prev) => prev && prev.account ? { ...prev, account: { ...prev.account, balance: Number(tx.source_balance_after) } } : prev);
+            }
+          } catch {}
         } else {
           throw new Error(result.message || 'Transfer failed');
         }
@@ -508,7 +525,7 @@ export default function UserPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {transactions.map(t => {
+                  {transactions.slice(0, 10).map(t => {
                     const isIncoming = t.target_account === me?.account_number || t.type === 'deposit';
                     return (
                       <tr key={t.id}>
